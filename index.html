@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>輻輳制御の可視化（RTT + 帯域幅考慮）</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .device-config {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 5px;
+    }
+
+    label {
+      font-size: 14px;
+    }
+
+    input {
+      width: 60px;
+      padding: 2px 5px;
+    }
+
+    button {
+      padding: 5px 10px;
+      font-size: 14px;
+    }
+
+    .bar-container {
+      display: flex;
+      width: 100%;
+      max-width: 800px;
+      height: 60px;
+      border: 2px solid #888;
+      margin-bottom: 10px;
+    }
+
+    .device-segment {
+      height: 100%;
+      color: white;
+      font-size: 12px;
+      text-align: center;
+      line-height: 60px;
+      white-space: nowrap;
+      overflow: hidden;
+      transition: width 0.15s ease;
+      box-sizing: border-box;
+      padding: 0 5px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .legend-item {
+      font-size: 14px;
+    }
+
+    .legend-color {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+  <h1>輻輳制御の可視化（RTT + 帯域幅考慮）</h1>
+  <form id="configForm">
+    <label>デバイス数 <input type="number" id="numDevices" min="1" max="20" value="3"></label>
+    <label>初期cwMin <input type="number" id="cwndMin" value="10"></label>
+    <label>初期cwMax <input type="number" id="cwndMax" value="30"></label>
+    <label>帯域幅の上限（仮想） <input type="number" id="maxBandwidth" value="100"></label>
+    <div id="deviceSettingsContainer"></div>
+    <button type="submit">リセット</button>
+  </form>
+
+  <div class="bar-container" id="bandwidthBar"></div>
+  <div class="legend" id="legend"></div>
+
+  <script>
+    const COLORS = ['#e74c3c', '#3498db', '#f39c12', '#2ecc71', '#9b59b6', '#1abc9c', '#34495e', '#e67e22', '#7f8c8d', '#8e44ad'];
+    const MAX_TOTAL_CWND = 100;
+
+    let devices = [];
+    let deviceTimers = [];
+
+    document.getElementById("numDevices").addEventListener("change", generateDeviceSettings);
+
+    function generateDeviceSettings() {
+      const container = document.getElementById("deviceSettingsContainer");
+      const num = parseInt(document.getElementById("numDevices").value);
+      container.innerHTML = '';
+      for (let i = 0; i < num; i++) {
+        const div = document.createElement("div");
+        div.className = "device-config";
+        div.innerHTML = `
+          <strong>デバイス ${i + 1}</strong>
+          <label>ロスMin <input type="number" step="0.01" min="0" max="1" id="lossMin-${i}" value="0.01"></label>
+          <label>ロスMax <input type="number" step="0.01" min="0" max="1" id="lossMax-${i}" value="0.05"></label>
+          <label>RTT(ms) <input type="number" step="10" min="10" max="2000" id="rtt-${i}" value="${100 + i * 100}"></label>
+        `;
+        container.appendChild(div);
+      }
+    }
+
+    generateDeviceSettings(); // 初期呼び出し
+
+    function createDevices(num, cwndMin, cwndMax, maxBandwidth) {
+      const bar = document.getElementById("bandwidthBar");
+      const legend = document.getElementById("legend");
+      bar.innerHTML = '';
+      legend.innerHTML = '';
+      devices = [];
+
+      // 前回のタイマーをクリア
+      deviceTimers.forEach(id => clearInterval(id));
+      deviceTimers = [];
+
+      for (let i = 0; i < num; i++) {
+        const segment = document.createElement("div");
+        segment.className = "device-segment";
+        segment.style.backgroundColor = COLORS[i % COLORS.length];
+        bar.appendChild(segment);
+
+        const lossMin = parseFloat(document.getElementById(`lossMin-${i}`).value);
+        const lossMax = parseFloat(document.getElementById(`lossMax-${i}`).value);
+        const rtt = parseInt(document.getElementById(`rtt-${i}`).value);
+        const legendItem = document.createElement("div");
+        const device = {
+          el: segment,
+          cwnd: cwndMin + Math.random() * (cwndMax - cwndMin),
+          lossProbability: lossMin + Math.random() * (lossMax - lossMin),
+          color: COLORS[i % COLORS.length],
+          id: i + 1,
+          rtt: rtt,
+          standard : MAX_TOTAL_CWND,
+          textItem : legendItem,
+          sendAmout :0
+        };
+
+        devices.push(device);
+
+        
+        legendItem.className = "legend-item";
+
+        const colorSpan = document.createElement("span");
+        colorSpan.className = "legend-color";
+        colorSpan.style.backgroundColor = device.color;
+
+        legendItem.appendChild(colorSpan);
+        legendItem.append(`デバイス ${device.id}`);
+        legend.appendChild(legendItem);
+        
+
+      }
+
+      // 各デバイスに個別のRTT更新タイマー
+      devices.forEach(dev => {
+        const updateFn = () => {
+          const totalCwnd = devices.reduce((sum, d) => sum + d.cwnd, 0);
+          
+          
+          if(totalCwnd > MAX_TOTAL_CWND){
+            dev.standard = dev.cwnd/2;
+            dev.cwnd /= 2;
+          }
+          if (Math.random() < dev.lossProbability) {
+            dev.standard = dev.cwnd/2;
+            dev.cwnd /= 2;
+          } else {
+            if(dev.cwnd > dev.standard){
+                dev.cwnd +=1;
+            }
+            else{
+                dev.cwnd *= 1.2;
+            }
+          }
+          dev.sendAmout += dev.cwnd;
+          dev.textItem.textContent = `デバイス ${dev.id} : ${dev.sendAmout}`;
+          const usage = (dev.cwnd / MAX_TOTAL_CWND) * maxBandwidth;
+          dev.el.style.width = `${usage}%`;
+          dev.el.textContent = `ID${dev.id} ${usage.toFixed(1)}% (cwnd: ${dev.cwnd.toFixed(1)})`;
+        };
+        const timerId = setInterval(updateFn, dev.rtt);
+        deviceTimers.push(timerId);
+      });
+    }
+
+    document.getElementById("configForm").addEventListener("submit", e => {
+      e.preventDefault();
+      const config = {
+        numDevices: parseInt(document.getElementById("numDevices").value),
+        cwndMin: parseFloat(document.getElementById("cwndMin").value),
+        cwndMax: parseFloat(document.getElementById("cwndMax").value),
+        maxBandwidth: parseFloat(document.getElementById("maxBandwidth").value)
+      };
+      createDevices(config.numDevices, config.cwndMin, config.cwndMax, config.maxBandwidth);
+    });
+
+    // 初期起動
+    createDevices(3, 10, 30, 100);
+  </script>
+</body>
+</html>
