@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>輻輳制御の可視化（RTT + 帯域幅考慮）</title>
+  <title>輻輳制御の可視化</title>
   <style>
     body {
       font-family: sans-serif;
@@ -93,9 +93,9 @@
   <h1>輻輳制御の可視化（RTT + 帯域幅考慮）</h1>
   <form id="configForm">
     <label>デバイス数 <input type="number" id="numDevices" min="1" max="20" value="3"></label>
-    <label>初期cwMin <input type="number" id="cwndMin" value="10"></label>
-    <label>初期cwMax <input type="number" id="cwndMax" value="30"></label>
-    <label>帯域幅の上限（仮想） <input type="number" id="maxBandwidth" value="100"></label>
+    <label>初期cwMin <input type="number" id="cwndMin" value="1"></label>
+    <label>初期cwMax <input type="number" id="cwndMax" value="1"></label>
+    <label>帯域幅の上限 <input type="number" id="maxBandwidth" value="100"></label>
     <div id="deviceSettingsContainer"></div>
     <button type="submit">リセット</button>
   </form>
@@ -224,7 +224,7 @@
     });
 
     // 初期起動
-    createDevices(3, 10, 30, 100);
+    createDevices(3, 1, 1, 100);
   </script>
 </body>
 </html>
